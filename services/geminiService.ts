@@ -288,7 +288,7 @@ Original sentence: "The company decided to launch its new product line next mont
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.5, // Slightly lower temperature for more precise structured output
+        temperature: 0.75, // Increased temperature for more variability
       },
     });
 
