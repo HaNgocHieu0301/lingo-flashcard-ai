@@ -68,10 +68,20 @@ const parseGeminiJsonResponse = <T,>(responseText: string): T | null => {
 export const generateFlashcardsFromAPI = async (
   topicName: string,
   count: number,
-  existingDefinitions: string[] = [] // FR2.3 & AI3
+  existingDefinitionsInTopic: string[] = [],
+  definitionsToProcess?: string[]
 ): Promise<Omit<FlashcardItem, 'id' | 'topic_id' | 'user_id' | 'created_at' | 'updated_at'>[]> => {
   if (!ai) {
     console.warn("Gemini AI client not initialized. API key might be missing.");
+    if (definitionsToProcess && definitionsToProcess.length > 0) {
+        return Promise.resolve(
+            definitionsToProcess.map((def, i) => ({
+                word: `Dummy Word for Def ${i + 1}`,
+                definition: def,
+                exampleSentence: `This is a dummy example for the provided definition: "${def.substring(0,30)}...".`
+            }))
+        );
+    }
     return Promise.resolve(
         Array.from({ length: count }, (_, i) => ({
             word: `Dummy Word ${i + 1} for ${topicName}`,
@@ -81,15 +91,41 @@ export const generateFlashcardsFromAPI = async (
     );
   }
 
-  let existingDefinitionsPrompt = "";
-  if (existingDefinitions.length > 0) {
-    existingDefinitionsPrompt = `
-The following definitions already exist for this topic. Please provide new flashcards with definitions DIFFERENT from these:
-${existingDefinitions.map(def => `- "${def}"`).join('\n')}
-`;
-  }
+  let prompt: string;
 
-  const prompt = `Generate ${count} English vocabulary flashcards for a learner.
+  const existingDefinitionsPrompt = 
+    existingDefinitionsInTopic.length > 0 
+    ? `The following definitions ALREADY EXIST for this topic. Please ensure your new flashcards (words, definitions, examples) are DIFFERENT from these existing ones:
+${existingDefinitionsInTopic.map(def => `- "${def.replace(/"/g, '\\"')}"`).join('\n')}`
+    : "";
+
+  if (definitionsToProcess && definitionsToProcess.length > 0 && count === definitionsToProcess.length) {
+    // Mode: Generate for a specific list of definitions
+    prompt = `Generate ${count} English vocabulary flashcards for a learner.
+For each flashcard, use one of the provided definitions below, then generate a suitable word and an example sentence.
+The flashcards should be relevant to the topic: "${topicName}".
+
+The ${count} definition(s) to use are:
+${definitionsToProcess.map(def => `- "${def.replace(/"/g, '\\"')}"`).join('\n')}
+
+${existingDefinitionsPrompt}
+
+Return the response as a JSON array, where each object has keys: "word", "definition", "exampleSentence".
+The "definition" field in your JSON output for each item MUST EXACTLY MATCH one of_the definitions provided in the list above.
+Ensure each "word" is concise, ideally one or two words.
+Ensure "exampleSentence" effectively uses the word.
+Ensure the generated "word" and "exampleSentence" are distinct and not already covered by the "ALREADY EXIST" list if provided.
+
+Example of a single item in the array for a provided definition "Lasting for a very short time.":
+{
+  "word": "Ephemeral",
+  "definition": "Lasting for a very short time.", 
+  "exampleSentence": "The beauty of the cherry blossoms is ephemeral, lasting only a week."
+}`;
+
+  } else {
+    // Mode: Generate 'count' new cards for a topic
+    prompt = `Generate ${count} English vocabulary flashcards for a learner.
 For each flashcard, provide the word, its definition, and an example sentence.
 The words should be related to the topic: "${topicName}".
 ${existingDefinitionsPrompt}
@@ -103,6 +139,8 @@ Example of a single item in the array:
   "definition": "Lasting for a very short time.",
   "exampleSentence": "The beauty of the cherry blossoms is ephemeral, lasting only a week."
 }`;
+  }
+
 
   try {
     const response: GenerateContentResponse = await ai.models.generateContent({
@@ -110,7 +148,7 @@ Example of a single item in the array:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.75, // Slightly increased for more variety given uniqueness constraint
+        temperature: (definitionsToProcess && definitionsToProcess.length > 0) ? 0.6 : 0.75, // Slightly less temp for specific definitions
       },
     });
 
@@ -132,6 +170,7 @@ Example of a single item in the array:
     if (Array.isArray(parsedData)) {
         rawFlashcards = parsedData;
     } else if (typeof parsedData === 'object' && parsedData !== null) {
+        // Attempt to find an array key if the response is an object containing the array
         const arrayKey = Object.keys(parsedData).find(key => Array.isArray(parsedData[key]));
         if (arrayKey && Array.isArray(parsedData[arrayKey])) {
             rawFlashcards = parsedData[arrayKey];
@@ -160,8 +199,22 @@ Example of a single item in the array:
         throw new Error("Generated flashcards were malformed or empty after validation.");
     }
     if (flashcards.length === 0 && count > 0) {
-       throw new Error("No valid flashcards were generated. The model returned an empty list or an unexpected format.");
+       // This can happen if definitionsToProcess was empty after filtering, or if AI failed to generate.
+       // The error message might need to be more specific based on the calling context in App.tsx.
+       throw new Error("No valid flashcards were generated. The model returned an empty list, an unexpected format, or all inputs were filtered.");
     }
+
+    // If processing specific definitions, ensure the output count matches input count
+    // and that definitions match. This is a basic sanity check.
+    if (definitionsToProcess && definitionsToProcess.length > 0) {
+        if (flashcards.length !== definitionsToProcess.length) {
+            console.warn(`Mismatch in generated cards count. Expected: ${definitionsToProcess.length}, Got: ${flashcards.length}. This might indicate AI partial failure or misinterpretation.`);
+            // Don't throw an error, but log it. App.tsx will save what was returned.
+        }
+        // Further validation could check if returned definitions match inputs, but can be complex if AI slightly alters them.
+        // The prompt strongly requests exact match.
+    }
+
     return flashcards;
 
   } catch (error) {
@@ -255,6 +308,7 @@ A real example:
       ...parsedMCQData.distractors.slice(0, 3).map(d => ({ text: d, isCorrect: false }))
     ];
     
+    // Shuffle options array
     for (let i = options.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [options[i], options[j]] = [options[j], options[i]];

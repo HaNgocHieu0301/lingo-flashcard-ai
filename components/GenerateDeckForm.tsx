@@ -3,12 +3,16 @@ import React, { useState, useEffect } from 'react';
 import { Topic } from '../types'; 
 
 interface GenerateDeckFormProps {
-  onGenerateAndSave: (topicName: string, count: number, existingTopicId?: string) => Promise<void>;
+  onGenerateAndSave: (
+    topicName: string, 
+    details: { mode: 'count', count: number } | { mode: 'list', definitionListString: string },
+    existingTopicId?: string
+  ) => Promise<void>;
   isLoading: boolean;
-  isTestActiveOrGenerating?: boolean; // Kept for potential future use if form is disabled during test
+  isTestActiveOrGenerating?: boolean;
   userTopics: Topic[]; 
   currentTopic?: Topic | null; 
-  onCancel?: () => void; // For closing the modal
+  onCancel?: () => void;
 }
 
 const GenerateDeckForm: React.FC<GenerateDeckFormProps> = ({
@@ -23,27 +27,38 @@ const GenerateDeckForm: React.FC<GenerateDeckFormProps> = ({
   const [count, setCount] = useState<number>(5);
   const [selectedTopicId, setSelectedTopicId] = useState<string | undefined>(undefined);
   const [isCreatingNewTopic, setIsCreatingNewTopic] = useState<boolean>(true);
+  const [generationMode, setGenerationMode] = useState<'count' | 'list'>('count');
+  const [definitionListInput, setDefinitionListInput] = useState<string>("");
+
 
   useEffect(() => {
-    if (currentTopic) { // Editing/adding to an existing topic passed to the modal
+    if (currentTopic) {
         setTopicName(currentTopic.name);
         setSelectedTopicId(currentTopic.id);
         setIsCreatingNewTopic(false);
-    } else { // Creating a brand new topic
-        setTopicName(""); // Default empty for new topic via modal
+    } else {
+        setTopicName("");
         setSelectedTopicId(undefined);
         setIsCreatingNewTopic(true);
     }
+    setDefinitionListInput(""); // Reset definition list on topic change or modal open/close
+    setGenerationMode('count'); // Reset mode
   }, [currentTopic]);
 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (topicName.trim() && count > 0 && Number.isFinite(count)) {
+    if (topicName.trim()) {
       const topicIdToUse = isCreatingNewTopic ? undefined : selectedTopicId;
-      // The promise from onGenerateAndSave will handle closing the modal or showing errors within it
-      await onGenerateAndSave(topicName.trim(), count, topicIdToUse);
-      // If successful, App.tsx handles closing the modal. If error, modal stays open.
+      if (generationMode === 'count' && count > 0 && Number.isFinite(count)) {
+        await onGenerateAndSave(topicName.trim(), { mode: 'count', count }, topicIdToUse);
+      } else if (generationMode === 'list' && definitionListInput.trim()) {
+        await onGenerateAndSave(topicName.trim(), { mode: 'list', definitionListString: definitionListInput.trim() }, topicIdToUse);
+      } else if (generationMode === 'list' && !definitionListInput.trim()) {
+        // Optionally, set an error state here instead of alert
+        alert("Please provide a list of definitions.");
+        return;
+      }
     }
   };
 
@@ -77,10 +92,16 @@ const GenerateDeckForm: React.FC<GenerateDeckFormProps> = ({
 
 
   const isDisabled = isLoading || isTestActiveOrGenerating;
+  const canSubmit = 
+    !isDisabled &&
+    topicName.trim() &&
+    (
+        (generationMode === 'count' && count > 0 && Number.isFinite(count)) ||
+        (generationMode === 'list' && definitionListInput.trim() !== "")
+    );
+
 
   return (
-    // Removed outer bg-white/dark:bg-slate-800 p-6 md:p-8 mb-8 rounded-xl shadow-xl animate-slideInUp as modal handles this
-    // The h2 title is also handled by the Modal component's title prop.
     <form onSubmit={handleSubmit} className="space-y-4">
     <div>
         <label htmlFor="topicSelection" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -88,9 +109,9 @@ const GenerateDeckForm: React.FC<GenerateDeckFormProps> = ({
         </label>
         <select
             id="topicSelection"
-            value={isCreatingNewTopic ? "new" : selectedTopicId || "new"} // Fallback to "new" if selectedTopicId is undefined
+            value={isCreatingNewTopic ? "new" : selectedTopicId || "new"}
             onChange={handleTopicSelectionChange}
-            disabled={isDisabled || !!currentTopic} // Disable if editing a specific topic passed via currentTopic
+            disabled={isDisabled || !!currentTopic}
             className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
         >
             <option value="new">Create a new topic</option>
@@ -120,22 +141,80 @@ const GenerateDeckForm: React.FC<GenerateDeckFormProps> = ({
     )}
 
     <div>
-        <label htmlFor="count" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-        Number of New Cards to Generate (1-20)
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+            Generation Method
         </label>
-        <input
-        type="number"
-        id="count"
-        value={count}
-        onChange={handleCountChange}
-        min="1"
-        max="20"
-        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
-        required
-        disabled={isDisabled}
-        aria-label="Number of new flashcards to generate"
-        />
+        <div className="flex items-center space-x-4">
+            <label htmlFor="genModeCount" className="flex items-center cursor-pointer">
+                <input 
+                    type="radio" 
+                    id="genModeCount" 
+                    name="generationMode" 
+                    value="count" 
+                    checked={generationMode === 'count'} 
+                    onChange={() => setGenerationMode('count')}
+                    className="h-4 w-4 text-sky-600 border-slate-300 dark:border-slate-500 focus:ring-sky-500"
+                    disabled={isDisabled}
+                />
+                <span className="ml-2 text-sm text-slate-700 dark:text-slate-300">By Count</span>
+            </label>
+            <label htmlFor="genModeList" className="flex items-center cursor-pointer">
+                <input 
+                    type="radio" 
+                    id="genModeList" 
+                    name="generationMode" 
+                    value="list" 
+                    checked={generationMode === 'list'} 
+                    onChange={() => setGenerationMode('list')}
+                    className="h-4 w-4 text-sky-600 border-slate-300 dark:border-slate-500 focus:ring-sky-500"
+                    disabled={isDisabled}
+                />
+                <span className="ml-2 text-sm text-slate-700 dark:text-slate-300">From Definition List</span>
+            </label>
+        </div>
     </div>
+
+    {generationMode === 'count' && (
+        <div>
+            <label htmlFor="count" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+            Number of New Cards to Generate (1-20)
+            </label>
+            <input
+            type="number"
+            id="count"
+            value={count}
+            onChange={handleCountChange}
+            min="1"
+            max="20"
+            className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100"
+            required={generationMode === 'count'}
+            disabled={isDisabled}
+            aria-label="Number of new flashcards to generate"
+            />
+        </div>
+    )}
+
+    {generationMode === 'list' && (
+        <div>
+            <label htmlFor="definitionList" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Paste Comma-Separated Definitions
+            </label>
+            <textarea
+                id="definitionList"
+                value={definitionListInput}
+                onChange={(e) => setDefinitionListInput(e.target.value)}
+                rows={4}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500"
+                placeholder="e.g., Lasting for a very short time., A journey for pleasure or education."
+                required={generationMode === 'list'}
+                disabled={isDisabled}
+                aria-label="Comma-separated list of definitions"
+            />
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Enter definitions separated by commas. Cards will only be generated for definitions new to this topic.</p>
+        </div>
+    )}
+
+
     <div className="pt-2 flex flex-col sm:flex-row justify-end gap-3">
         {onCancel && (
         <button
@@ -150,7 +229,7 @@ const GenerateDeckForm: React.FC<GenerateDeckFormProps> = ({
         <button
         type="submit"
         className="px-6 py-2 bg-sky-500 hover:bg-sky-600 dark:bg-sky-600 dark:hover:bg-sky-500 text-white font-semibold rounded-lg shadow-sm transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 dark:focus:ring-offset-slate-800 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center"
-        disabled={isDisabled || !topicName.trim() || !(count > 0 && Number.isFinite(count))}
+        disabled={!canSubmit}
         >
         {isLoading ? (
             <>

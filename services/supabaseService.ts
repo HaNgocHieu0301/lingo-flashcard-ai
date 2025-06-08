@@ -1,12 +1,9 @@
-
 import { createClient, Session, User } from '@supabase/supabase-js';
 import { Topic, FlashcardItem } from '../types';
 
 // Directly integrated Supabase URL and Anon Key
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-console.log("SUPABASE_URL", SUPABASE_URL);
-console.log("SUPABASE_ANON_KEY", SUPABASE_ANON_KEY);
 export const supabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
 
 // Type for data being inserted into the 'flashcards' table
@@ -81,11 +78,32 @@ export const fetchTopics = async (userId: string): Promise<Topic[]> => {
   })) as Topic[];
 };
 
+export const fetchTopicById = async (topicId: string): Promise<Topic | null> => {
+  const { data, error } = await supabase
+    .from('topics')
+    .select('*, flashcards(count)')
+    .eq('id', topicId)
+    .single();
+  
+  if (error) {
+    console.error(`Error fetching topic by ID ${topicId}:`, error);
+    if (error.code === 'PGRST116') return null; // Not found
+    throw error;
+  }
+  if (!data) return null;
+  
+  return {
+    ...data,
+    flashcard_count: data.flashcards[0]?.count || 0
+  } as Topic;
+};
+
+
 export const addTopic = async (userId: string, name: string): Promise<Topic> => {
   const { data, error } = await supabase
     .from('topics')
     .insert([{ user_id: userId, name: name }])
-    .select()
+    .select('*, flashcards(count)') // fetch count for newly created topic
     .single();
   if (error) {
      console.error('Error adding topic:', error);
@@ -94,7 +112,10 @@ export const addTopic = async (userId: string, name: string): Promise<Topic> => 
      }
     throw error;
   }
-  return data as Topic;
+   return {
+    ...data,
+    flashcard_count: data.flashcards[0]?.count || 0
+  } as Topic;
 };
 
 export const deleteTopic = async (topicId: string): Promise<void> => {
@@ -176,7 +197,7 @@ export const updateFlashcard = async (flashcardId: string, updates: Partial<Pick
 export const getTopicByName = async (userId: string, topicName: string): Promise<Topic | null> => {
   const { data, error } = await supabase
     .from('topics')
-    .select('*')
+    .select('*, flashcards(count)')
     .eq('user_id', userId)
     .eq('name', topicName)
     .maybeSingle();
@@ -184,7 +205,11 @@ export const getTopicByName = async (userId: string, topicName: string): Promise
     console.error('Error fetching topic by name:', error);
     throw error;
   }
-  return data as Topic | null;
+  if (!data) return null;
+  return {
+    ...data,
+    flashcard_count: data.flashcards[0]?.count || 0
+  } as Topic;
 };
 
 export const getExistingDefinitionsForTopic = async (topicId: string): Promise<string[]> => {

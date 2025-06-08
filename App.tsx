@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Session as SupabaseSession } from '@supabase/supabase-js';
 import { FlashcardItem, MCQItem, UserAnswer, Topic, User } from './types';
@@ -162,7 +163,11 @@ const App: React.FC = () => {
     setIsGenerateDeckModalOpen(true);
   };
 
-  const handleGenerateAndSaveDeck = async (topicName: string, count: number, existingTopicId?: string) => {
+  const handleGenerateAndSaveDeck = async (
+    topicName: string, 
+    generationDetails: { mode: 'count', count: number } | { mode: 'list', definitionListString: string },
+    existingTopicId?: string
+  ) => {
     if (!currentUser) {
       setModalError("You must be logged in to create decks.");
       return;
@@ -172,23 +177,63 @@ const App: React.FC = () => {
     try {
       let targetTopicId = existingTopicId;
       let finalTopicName = topicName;
-      let isNewTopic = false;
 
       if (!targetTopicId) { 
         const newTopic = await supabaseService.addTopic(currentUser.id, topicName);
         targetTopicId = newTopic.id;
         finalTopicName = newTopic.name; 
-        isNewTopic = true;
       } else { 
-         const existingTopicDetails = topics.find(t => t.id === targetTopicId);
-         if (existingTopicDetails) finalTopicName = existingTopicDetails.name;
+        const existingTopicDetails = topics.find(t => t.id === targetTopicId);
+        if (existingTopicDetails) finalTopicName = existingTopicDetails.name;
       }
       
-      const existingDefinitions = await supabaseService.getExistingDefinitionsForTopic(targetTopicId);
-      const newCardData = await generateFlashcardsFromAPI(finalTopicName, count, existingDefinitions);
+      const existingDefinitionsInTopic = await supabaseService.getExistingDefinitionsForTopic(targetTopicId);
+      let newCardData: Omit<FlashcardItem, 'id' | 'topic_id' | 'user_id' | 'created_at' | 'updated_at'>[] = [];
+
+      if (generationDetails.mode === 'count') {
+        newCardData = await generateFlashcardsFromAPI(finalTopicName, generationDetails.count, existingDefinitionsInTopic);
+      } else { // mode === 'list'
+        const parsedDefinitions = generationDetails.definitionListString
+          .split(',')
+          .map(def => def.trim())
+          .filter(def => def.length > 0);
+        
+        if (parsedDefinitions.length === 0) {
+          throw new Error("The provided definition list is empty or contains only whitespace.");
+        }
+
+        const uniqueProvidedDefinitions = Array.from(new Set(parsedDefinitions.map(def => def.toLowerCase())));
+        
+        const definitionsToGenerateForAPI = uniqueProvidedDefinitions.filter(
+          pdDef => !existingDefinitionsInTopic.some(edDef => edDef.toLowerCase() === pdDef)
+        );
+
+        if (definitionsToGenerateForAPI.length === 0) {
+          throw new Error("All definitions provided already exist in this topic or the list was empty after filtering.");
+        }
+        // We need to pass the original casing of the definitions to the API, not the lowercased ones.
+        // So, we find the original-cased versions from parsedDefinitions that match the lowercased unique new ones.
+        const originalCasedDefinitionsToProcess = parsedDefinitions.filter(originalDef => 
+          definitionsToGenerateForAPI.includes(originalDef.toLowerCase())
+        );
+        // Ensure uniqueness again for original cased definitions, as "Def A, def a" could both pass above filter
+        const finalDefinitionsToProcess = Array.from(new Set(originalCasedDefinitionsToProcess));
+
+
+        if (finalDefinitionsToProcess.length === 0) { // Should be rare if definitionsToGenerateForAPI had items
+           throw new Error("No new definitions to process after final filtering. Check for case variations of existing definitions.");
+        }
+        
+        newCardData = await generateFlashcardsFromAPI(
+          finalTopicName, 
+          finalDefinitionsToProcess.length, // count is length of definitions to process
+          existingDefinitionsInTopic,
+          finalDefinitionsToProcess // pass the actual definitions to process
+        );
+      }
       
       if (newCardData.length === 0) {
-        throw new Error("AI did not generate any new cards. Please try again or adjust your topic/count.");
+        throw new Error("AI did not generate any new cards. Please try again or adjust your input.");
       }
 
       const flashcardsToSave = newCardData.map(card => ({
@@ -203,8 +248,17 @@ const App: React.FC = () => {
       
       await fetchUserTopics(); 
 
-      if (selectedTopic && selectedTopic.id === targetTopicId && (appView === 'practice_deck_selection' || appView === 'edit_deck_cards')) {
+      if (selectedTopic && selectedTopic.id === targetTopicId && (appView === 'practice_deck_selection' || appView === 'edit_deck_cards' || appView === 'study_deck')) {
         await fetchFlashcardsForSelectedTopic(targetTopicId);
+      } else if (!selectedTopic && !existingTopicId && targetTopicId && generationDetails.mode === 'count' && generationDetails.count > 0) {
+        // If a new topic was created and cards added, and no topic was previously selected,
+        // select this new topic and fetch its cards for study view.
+        const newlyCreatedTopic = topics.find(t=> t.id === targetTopicId) || await supabaseService.fetchTopicById(targetTopicId); // Fetch if not in state yet
+        if (newlyCreatedTopic) {
+          setSelectedTopic(newlyCreatedTopic);
+          setAppView('study_deck'); 
+          // fetchFlashcardsForSelectedTopic will be triggered by useEffect for selectedTopic
+        }
       }
       
       setIsGenerateDeckModalOpen(false); 
@@ -485,15 +539,15 @@ const App: React.FC = () => {
           <>
             <div className="w-full flex justify-between items-center mb-2">
                 <button onClick={navigateToDashboard} className="text-sm text-sky-600 dark:text-sky-400 hover:underline">&larr; To Topics</button>
-                 <button 
+                <button 
                     onClick={() => {
-                        // Decide whether to go to practice or edit. Default to practice for now.
                         handlePracticeTopic(selectedTopic); 
                     }} 
                     className="text-sm text-sky-600 dark:text-sky-400 hover:underline"
-                 >
-                    Practice / Edit Cards &rarr;
-                 </button>
+                    aria-label={`Practice or edit cards for ${selectedTopic.name}`}
+                >
+                    Practice &rarr;
+                </button>
             </div>
             <h2 className="text-2xl font-semibold text-center text-sky-700 dark:text-sky-300 mb-4">Studying: {selectedTopic.name}</h2>
             <FlashcardView card={activeFlashcard} isFlipped={isFlipped} onFlip={handleFlipCard} />
@@ -508,7 +562,7 @@ const App: React.FC = () => {
               deckSize={currentFlashcards.length}
             />
             {currentFlashcards.length > 0 && (
-                <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-4">
+                <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-4" aria-live="polite">
                     Card {currentFlashcardIndex + 1} of {currentFlashcards.length}
                 </p>
             )}
