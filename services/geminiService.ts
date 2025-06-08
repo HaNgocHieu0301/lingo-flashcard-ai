@@ -1,14 +1,13 @@
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { FlashcardItem, MCQItem, MCQOption } from '../types';
 
-const API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY   = process.env.GEMINI_API_KEY;
 
 let ai: GoogleGenAI | null = null;
-if (API_KEY) {
-  ai = new GoogleGenAI({ apiKey: API_KEY });
+if (GEMINI_API_KEY) {
+  ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 } else {
-  console.warn("API_KEY environment variable not set. Gemini API features will be disabled. Using placeholder data.");
+  console.warn("GEMINI_API_KEY environment variable not set. Gemini API features will be disabled. Using placeholder data.");
 }
 
 const parseGeminiJsonResponse = <T,>(responseText: string): T | null => {
@@ -23,8 +22,7 @@ const parseGeminiJsonResponse = <T,>(responseText: string): T | null => {
     return JSON.parse(jsonStr) as T;
   } catch (error) {
     console.warn("Failed to parse JSON response (attempt 1):", error, "Raw string (after fence removal):", jsonStr.substring(0, 500));
-
-    // Fallback for flashcard array (if previous attempt failed)
+    // Fallback for flashcard array
     if (jsonStr.startsWith('[') && jsonStr.endsWith(']')) {
         const objects: Record<string, string>[] = [];
         const objectRegex = /\{\s*"word"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"definition"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"exampleSentence"\s*:\s*"((?:\\.|[^"\\])*)"\s*\}/g;
@@ -38,12 +36,11 @@ const parseGeminiJsonResponse = <T,>(responseText: string): T | null => {
         }
         if (objects.length > 0) {
           console.warn(`Successfully extracted ${objects.length} individual flashcard objects via regex fallback for array.`);
-          return objects as T; // Assuming T is FlashcardItem[]
+          return objects as T;
         }
     }
-    // Fallback for single MCQItem (if previous attempt failed)
+    // Fallback for single MCQItem
      try {
-        // More flexible regex for MCQ, handling potential variations in spacing or optional quotes around keys
         const mcqObjectRegex = /\{\s*(?:"?word"?:\s*"((?:\\.|[^"\\])*)"\s*,)?\s*"?questionSentence"?\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"?correctAnswer"?\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"?distractors"?\s*:\s*\[\s*("((?:\\.|[^"\\])*)"\s*,\s*"((?:\\.|[^"\\])*)"\s*,\s*"((?:\\.|[^"\\])*)")\s*\]\s*,\s*"?explanation"?\s*:\s*"((?:\\.|[^"\\])*)"\s*\}/is;
         const mcqMatch = jsonStr.match(mcqObjectRegex);
         if (mcqMatch) {
@@ -58,34 +55,44 @@ const parseGeminiJsonResponse = <T,>(responseText: string): T | null => {
                 explanation: mcqMatch[8]?.replace(/\\"/g, '"') || "",
             };
             console.warn("Successfully extracted single MCQ object via regex fallback.");
-            return extractedMCQ as T; // Assuming T is compatible with this structure
+            return extractedMCQ as T;
         }
     } catch (e) {
         console.error("Error during MCQ regex extraction attempt:", e);
     }
-
-
     console.error("Failed to parse JSON with direct parse and specific fallbacks. Full string:", jsonStr);
     return null;
   }
 };
 
-export const generateFlashcardsFromAPI = async (topic: string, count: number): Promise<FlashcardItem[]> => {
+export const generateFlashcardsFromAPI = async (
+  topicName: string,
+  count: number,
+  existingDefinitions: string[] = [] // FR2.3 & AI3
+): Promise<Omit<FlashcardItem, 'id' | 'topic_id' | 'user_id' | 'created_at' | 'updated_at'>[]> => {
   if (!ai) {
     console.warn("Gemini AI client not initialized. API key might be missing.");
     return Promise.resolve(
         Array.from({ length: count }, (_, i) => ({
-            id: `dummy-${topic.replace(/\s+/g, '-')}-${i}-${Date.now()}`,
-            word: `Dummy Word ${i + 1} for ${topic}`,
-            definition: "This is a placeholder definition as the API key is not configured.",
+            word: `Dummy Word ${i + 1} for ${topicName}`,
+            definition: `This is a placeholder definition for ${topicName} as the API key is not configured. Def #${i+1}`,
             exampleSentence: `This is a dummy example sentence for word ${i + 1}.`
         }))
     );
   }
 
+  let existingDefinitionsPrompt = "";
+  if (existingDefinitions.length > 0) {
+    existingDefinitionsPrompt = `
+The following definitions already exist for this topic. Please provide new flashcards with definitions DIFFERENT from these:
+${existingDefinitions.map(def => `- "${def}"`).join('\n')}
+`;
+  }
+
   const prompt = `Generate ${count} English vocabulary flashcards for a learner.
 For each flashcard, provide the word, its definition, and an example sentence.
-The words should be related to the topic: "${topic}".
+The words should be related to the topic: "${topicName}".
+${existingDefinitionsPrompt}
 Return the response as a JSON array, where each object has keys: "word", "definition", "exampleSentence".
 Ensure each "word" is concise, ideally one or two words.
 Ensure "definition" is clear and suitable for an English learner.
@@ -103,7 +110,7 @@ Example of a single item in the array:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.7, 
+        temperature: 0.75, // Slightly increased for more variety given uniqueness constraint
       },
     });
 
@@ -142,12 +149,11 @@ Example of a single item in the array:
       throw new Error("Formatted flashcards data is not an array.");
     }
     
-    const flashcards: FlashcardItem[] = rawFlashcards.map((item: any, index: number) => ({
-      id: `${topic.replace(/\s+/g, '-')}-flashcard-${index}-${Date.now()}`,
-      word: item.word || "N/A - Check Format",
-      definition: item.definition || "N/A - Check Format",
-      exampleSentence: item.exampleSentence || "N/A - Check Format",
-    })).filter(card => card.word !== "N/A - Check Format" && card.definition !== "N/A - Check Format" && card.exampleSentence !== "N/A - Check Format");
+    const flashcards: Omit<FlashcardItem, 'id' | 'topic_id' | 'user_id' | 'created_at' | 'updated_at'>[] = rawFlashcards.map((item: any) => ({
+      word: item.word || "N/A",
+      definition: item.definition || "N/A",
+      exampleSentence: item.exampleSentence || "N/A",
+    })).filter(card => card.word !== "N/A" && card.definition !== "N/A" && card.exampleSentence !== "N/A");
 
     if (flashcards.length === 0 && rawFlashcards.length > 0) {
         console.warn("All flashcards were filtered out as malformed. Original data:", rawFlashcards);
@@ -169,12 +175,11 @@ Example of a single item in the array:
 export const generateMCQForFlashcard = async (flashcard: FlashcardItem): Promise<Omit<MCQItem, 'id' | 'flashcardId'>> => {
   if (!ai) {
     console.warn("Gemini AI client not initialized for MCQ. API key might be missing.");
-    // Provide a dummy MCQ if API is not available
     const dummyDistractors = ["Option A", "Option B", "Option C"];
     const options: MCQOption[] = [
       { text: flashcard.word, isCorrect: true },
       ...dummyDistractors.map(d => ({ text: d, isCorrect: false }))
-    ].sort(() => Math.random() - 0.5); // Shuffle options
+    ].sort(() => Math.random() - 0.5); 
 
     return Promise.resolve({
       questionSentence: flashcard.exampleSentence.replace(new RegExp(`\\b${flashcard.word}\\b`, 'gi'), "______") + " (Dummy MCQ - API Key Missing)",
@@ -223,7 +228,7 @@ A real example:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.6, // Slightly lower temperature for more predictable MCQ generation
+        temperature: 0.6,
       },
     });
 
@@ -244,16 +249,12 @@ A real example:
       console.error(`Failed to parse valid MCQ data from Gemini response for word "${flashcard.word}". Response text:`, responseText, "Parsed data:", parsedMCQData);
       throw new Error(`Failed to parse valid MCQ data for word "${flashcard.word}".`);
     }
-    
-    // Ensure the correctAnswer from API matches the flashcard's word, with flexibility for minor variations (e.g. case) if necessary, though prompt asks for original.
-    // For stricter matching, use: if (parsedMCQData.correctAnswer !== flashcard.word) { // throw error or log warning }
-    
+        
     const options: MCQOption[] = [
       { text: parsedMCQData.correctAnswer, isCorrect: true },
       ...parsedMCQData.distractors.slice(0, 3).map(d => ({ text: d, isCorrect: false }))
     ];
     
-    // Shuffle options client-side to ensure randomness if API doesn't shuffle
     for (let i = options.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [options[i], options[j]] = [options[j], options[i]];
@@ -263,23 +264,22 @@ A real example:
       questionSentence: parsedMCQData.questionSentence,
       options,
       explanation: parsedMCQData.explanation,
-      originalWord: flashcard.word // Store the original word for reference
+      originalWord: flashcard.word
     };
 
   } catch (error) {
     console.error(`Error generating MCQ for flashcard word "${flashcard.word}" with Gemini:`, error);
     const errorMessage = error instanceof Error ? error.message : `An unknown error occurred while generating MCQ for "${flashcard.word}".`;
-    // Fallback to a dummy/error MCQ to avoid breaking the entire test generation
-     const dummyDistractors = ["Option A", "Option B", "Option C"];
+     const dummyDistractors = ["Option A Error", "Option B Error", "Option C Error"];
       const fallbackOptions: MCQOption[] = [
         { text: flashcard.word, isCorrect: true },
         ...dummyDistractors.map(d => ({ text: d, isCorrect: false }))
       ].sort(() => Math.random() - 0.5);
 
     return {
-      questionSentence: flashcard.exampleSentence.replace(new RegExp(`\\b${flashcard.word}\\b`, 'gi'), "______") + ` (Error generating: ${errorMessage})`,
+      questionSentence: flashcard.exampleSentence.replace(new RegExp(`\\b${flashcard.word}\\b`, 'gi'), "______") + ` (Error generating MCQ: ${errorMessage.substring(0,100)})`,
       options: fallbackOptions,
-      explanation: `Could not generate explanation due to error: ${errorMessage}`,
+      explanation: `Could not generate explanation due to error: ${errorMessage.substring(0,100)}`,
       originalWord: flashcard.word
     };
   }

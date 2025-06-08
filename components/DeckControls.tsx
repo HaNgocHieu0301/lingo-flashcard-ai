@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface DeckControlsProps {
@@ -6,13 +5,10 @@ interface DeckControlsProps {
   onPrevious: () => void;
   onFlip: () => void;
   onShuffle: () => void;
-  onStartTest?: () => void;
   canPrevious: boolean;
   canNext: boolean;
   isDeckEmpty: boolean;
-  deckSize: number; // New prop: actual number of cards in the deck
-  isTestModeActive?: boolean;
-  isGeneratingTest?: boolean;
+  deckSize: number;
 }
 
 const PrevIcon: React.FC<{className?: string}> = ({className}) => (
@@ -39,39 +35,27 @@ const ShuffleIcon: React.FC<{className?: string}> = ({className}) => (
 </svg>
 );
 
-const TestIcon: React.FC<{className?: string}> = ({className}) => (
-  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className || "w-5 h-5"}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M10.125 2.25h-4.5c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125v-9M10.125 2.25h.375a9 9 0 0 1 9 9v.375M10.125 2.25A3.375 3.375 0 0 1 13.5 5.625v1.5c0 .621.504 1.125 1.125 1.125h1.5a3.375 3.375 0 0 1 3.375 3.375M9 15l2.25 2.25L15 12" />
-  </svg>
-);
-
-
 const DeckControls: React.FC<DeckControlsProps> = ({ 
     onNext, 
     onPrevious, 
     onFlip, 
     onShuffle, 
-    onStartTest,
     canPrevious, 
     canNext, 
     isDeckEmpty,
-    deckSize, // Use new prop
-    isTestModeActive,
-    isGeneratingTest
+    deckSize
 }) => {
   const baseButtonClass = "px-4 py-2 rounded-lg font-semibold transition-all duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 flex items-center justify-center space-x-2";
   const primaryButtonClass = `${baseButtonClass} bg-sky-500 hover:bg-sky-600 dark:bg-sky-600 dark:hover:bg-sky-500 text-white focus:ring-sky-400`;
   const secondaryButtonClass = `${baseButtonClass} bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 focus:ring-slate-400`;
   const disabledButtonClass = "opacity-50 cursor-not-allowed";
 
-  const commonDisabled = isDeckEmpty || isTestModeActive || isGeneratingTest;
-
   return (
     <div className="flex flex-wrap justify-center gap-3 my-6 animate-fadeIn">
       <button
         onClick={onPrevious}
-        disabled={!canPrevious || commonDisabled}
-        className={`${secondaryButtonClass} ${(!canPrevious || commonDisabled) ? disabledButtonClass : ''}`}
+        disabled={!canPrevious || isDeckEmpty}
+        className={`${secondaryButtonClass} ${(!canPrevious || isDeckEmpty) ? disabledButtonClass : ''}`}
         aria-label="Previous card"
       >
         <PrevIcon />
@@ -79,8 +63,8 @@ const DeckControls: React.FC<DeckControlsProps> = ({
       </button>
       <button
         onClick={onFlip}
-        disabled={commonDisabled}
-        className={`${primaryButtonClass} ${(commonDisabled) ? disabledButtonClass : ''}`}
+        disabled={isDeckEmpty}
+        className={`${primaryButtonClass} ${(isDeckEmpty) ? disabledButtonClass : ''}`}
         aria-label="Flip card"
       >
         <FlipIcon />
@@ -88,8 +72,8 @@ const DeckControls: React.FC<DeckControlsProps> = ({
       </button>
       <button
         onClick={onNext}
-        disabled={!canNext || commonDisabled}
-        className={`${secondaryButtonClass} ${(!canNext || commonDisabled) ? disabledButtonClass : ''}`}
+        disabled={!canNext || isDeckEmpty}
+        className={`${secondaryButtonClass} ${(!canNext || isDeckEmpty) ? disabledButtonClass : ''}`}
         aria-label="Next card"
       >
         <span>Next</span>
@@ -97,24 +81,13 @@ const DeckControls: React.FC<DeckControlsProps> = ({
       </button>
       <button
         onClick={onShuffle}
-        disabled={commonDisabled || deckSize <= 1}
-        className={`${secondaryButtonClass} ${(commonDisabled || deckSize <= 1) ? disabledButtonClass : ''} min-w-[110px]`}
+        disabled={isDeckEmpty || deckSize <= 1}
+        className={`${secondaryButtonClass} ${(isDeckEmpty || deckSize <= 1) ? disabledButtonClass : ''} min-w-[110px]`}
         aria-label="Shuffle deck"
       >
         <ShuffleIcon />
         <span>Shuffle</span>
       </button>
-      {onStartTest && !isDeckEmpty && !isTestModeActive && (
-         <button
-            onClick={onStartTest}
-            disabled={isGeneratingTest}
-            className={`${primaryButtonClass} min-w-[120px] ${(isGeneratingTest) ? disabledButtonClass : ''}`}
-            aria-label="Start Test"
-        >
-            <TestIcon />
-            <span>Start Test</span>
-        </button>
-      )}
     </div>
   );
 };

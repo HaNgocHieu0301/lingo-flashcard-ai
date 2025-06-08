@@ -82,3 +82,6 @@ temp/
 
 # Runtime files
 *.tsbuildinfo
+
+# Business files
+BUSINESS_REQUIREMENTS.md
