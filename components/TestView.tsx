@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { MCQItem, UserAnswer, MCQOption } from '../types';
 
@@ -72,7 +71,7 @@ const TestView: React.FC<TestViewProps> = ({
       </div>
 
       {userAnswer && (
-        <div className={`mt-6 p-4 rounded-md animate-fadeIn ${userAnswer.isCorrect ? 'bg-green-50 dark:bg-green-900 border border-green-300 dark:border-green-700' : 'bg-red-50 dark:bg-red-900 border border-red-300 dark:border-red-700'}`}>
+        <div className={`mt-6 mb-8 p-4 rounded-md animate-fadeIn ${userAnswer.isCorrect ? 'bg-green-50 dark:bg-green-900 border border-green-300 dark:border-green-700' : 'bg-red-50 dark:bg-red-900 border border-red-300 dark:border-red-700'}`}>
           <h3 className={`font-bold ${userAnswer.isCorrect ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
             {userAnswer.isCorrect ? 'Correct!' : 'Incorrect.'}
           </h3>
@@ -81,7 +80,7 @@ const TestView: React.FC<TestViewProps> = ({
               Correct answer: <strong className="text-green-600 dark:text-green-400">{questionItem.options.find(o => o.isCorrect)?.text}</strong>
             </p>
           )}
-          <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{questionItem.explanation}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 whitespace-pre-wrap leading-relaxed">{questionItem.explanation}</p>
         </div>
       )}
 

@@ -228,7 +228,7 @@ Example of a single item in the array:
 export const generateMCQForFlashcard = async (flashcard: FlashcardItem): Promise<Omit<MCQItem, 'id' | 'flashcardId'>> => {
   if (!ai) {
     console.warn("Gemini AI client not initialized for MCQ. API key might be missing.");
-    const dummyDistractors = ["Option A", "Option B", "Option C"];
+    const dummyDistractors = ["Option A (Dummy)", "Option B (Dummy)", "Option C (Dummy)"];
     const options: MCQOption[] = [
       { text: flashcard.word, isCorrect: true },
       ...dummyDistractors.map(d => ({ text: d, isCorrect: false }))
@@ -237,7 +237,7 @@ export const generateMCQForFlashcard = async (flashcard: FlashcardItem): Promise
     return Promise.resolve({
       questionSentence: flashcard.exampleSentence.replace(new RegExp(`\\b${flashcard.word}\\b`, 'gi'), "______") + " (Dummy MCQ - API Key Missing)",
       options: options,
-      explanation: "This is a dummy explanation because the API key is not configured.",
+      explanation: `Correct Answer: ${flashcard.word}. This is a dummy explanation because the API key is not configured. It should explain why '${flashcard.word}' is correct and why other options are incorrect, including their meanings.`,
       originalWord: flashcard.word
     });
   }
@@ -249,13 +249,18 @@ Definition: "${flashcard.definition}"
 Example Sentence: "${flashcard.exampleSentence}"
 
 Generate a multiple-choice question (MCQ) to test the understanding of the word "${flashcard.word}" in the context of its example sentence.
-The question should be a "fill in the blank" style, where the blank replaces the word "${flashcard.word}" in the example sentence.
+The question should be a "fill in the blank" style, where the blank replaces ALL instances of the word "${flashcard.word}" (case-insensitive) in the example sentence.
 
 Provide:
 1. "questionSentence": The example sentence with ALL instances of "${flashcard.word}" (case-insensitive) replaced by "______" (a blank).
 2. "correctAnswer": The original word "${flashcard.word}".
 3. "distractors": An array of 3 plausible but incorrect words that could fit the blank grammatically but not contextually or semantically, considering the definition. These should be different from the correct answer and from each other. Ensure they are single words or very short phrases if the original word is.
-4. "explanation": A brief explanation (1-2 sentences) of why "${flashcard.word}" is the correct answer for the sentence, ideally referencing its definition or contextual clues in the sentence.
+4. "explanation": A comprehensive explanation as a single string. This explanation MUST include:
+    a. Why the "correctAnswer" ("${flashcard.word}") is right, referencing its definition and the sentence context.
+    b. For EACH of the 3 "distractors":
+        i. Briefly state its meaning.
+        ii. Explain why it is an incorrect choice for the blank in the provided "questionSentence".
+    Format the explanation for readability, perhaps using newlines to separate points for the correct answer and each distractor.
 
 Return this information as a single JSON object with keys: "questionSentence", "correctAnswer", "distractors" (an array of 3 strings), and "explanation".
 
@@ -263,15 +268,17 @@ Example for word "Ephemeral" and sentence "The beauty of the cherry blossoms is 
 {
   "questionSentence": "The beauty of the cherry blossoms is ______, lasting only a week. This ______ sight is cherished.",
   "correctAnswer": "Ephemeral",
-  "distractors": ["Permanent", "Lasting", "Eternal"],
-  "explanation": "'Ephemeral' means lasting for a very short time. This fits the context of cherry blossoms lasting only a week and the sight being cherished because it's temporary."
+  "distractors": ["Permanent", "Ubiquitous", "Silent"],
+  "explanation": "The correct answer is 'Ephemeral' because it means 'lasting for a very short time,' which perfectly describes cherry blossoms that last only a week and are cherished for their brief appearance.\\n\\nIncorrect options:\\n- 'Permanent' means 'lasting or intended to last or remain unchanged indefinitely.' This is incorrect because the sentence states the blossoms last 'only a week,' which is not permanent.\\n- 'Ubiquitous' means 'present, appearing, or found everywhere.' While cherry blossoms might be widespread, the sentence's focus ('lasting only a week') is on their short duration, not their pervasiveness.\\n- 'Silent' means 'not making or accompanied by any sound.' This is irrelevant to the context of the blossoms' lifespan and visual beauty described in the sentence."
 }
-A real example:
+
+A real example for a different word "launch":
+Original sentence: "The company decided to launch its new product line next month."
 {
   "questionSentence": "The company decided to ______ its new product line next month.",
   "correctAnswer": "launch",
   "distractors": ["eat", "sleep", "justify"],
-  "explanation": "'Launch' means to introduce a new product, which fits the context of a company and its new product line."
+  "explanation": "The correct answer is 'launch' because 'to launch a product' means to introduce it to the market. This fits the context of a company and its new product line being introduced next month.\\n\\nIncorrect options:\\n- 'eat' means 'to put food into the mouth and chew and swallow it.' This does not make sense in the context of a product line.\\n- 'sleep' means 'to rest your mind and body by closing your eyes and becoming unconscious.' This is also irrelevant to a company's action with a product line.\\n- 'justify' means 'to show or prove to be right or reasonable.' While a company might justify a product line, the blank describes the action of introducing it, not defending it."
 }
 `;
 
@@ -281,7 +288,7 @@ A real example:
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.6,
+        temperature: 0.5, // Slightly lower temperature for more precise structured output
       },
     });
 
@@ -298,9 +305,9 @@ A real example:
       explanation: string;
     }>(responseText);
 
-    if (!parsedMCQData || !parsedMCQData.correctAnswer || !parsedMCQData.distractors || parsedMCQData.distractors.length < 3) {
+    if (!parsedMCQData || !parsedMCQData.correctAnswer || !parsedMCQData.distractors || parsedMCQData.distractors.length < 3 || !parsedMCQData.explanation) {
       console.error(`Failed to parse valid MCQ data from Gemini response for word "${flashcard.word}". Response text:`, responseText, "Parsed data:", parsedMCQData);
-      throw new Error(`Failed to parse valid MCQ data for word "${flashcard.word}".`);
+      throw new Error(`Failed to parse valid MCQ data for word "${flashcard.word}". The AI response might be malformed or incomplete.`);
     }
         
     const options: MCQOption[] = [
@@ -333,7 +340,7 @@ A real example:
     return {
       questionSentence: flashcard.exampleSentence.replace(new RegExp(`\\b${flashcard.word}\\b`, 'gi'), "______") + ` (Error generating MCQ: ${errorMessage.substring(0,100)})`,
       options: fallbackOptions,
-      explanation: `Could not generate explanation due to error: ${errorMessage.substring(0,100)}`,
+      explanation: `Correct Answer: ${flashcard.word}. Could not generate detailed explanation due to error: ${errorMessage.substring(0,100)}. Normally, this would explain why '${flashcard.word}' is correct and why other options are incorrect.`,
       originalWord: flashcard.word
     };
   }
