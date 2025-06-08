@@ -264,7 +264,6 @@ const App: React.FC = () => {
       
       <footer className="mt-12 text-center text-xs text-slate-500 dark:text-slate-400">
         <p>&copy; {new Date().getFullYear()} LingoFlip AI. Enhance your vocabulary journey.</p>
-        <p>Ensure API_KEY is configured in your environment for AI generation.</p>
       </footer>
     </div>
   );
